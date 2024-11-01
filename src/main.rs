@@ -4,9 +4,13 @@ use glam::DVec2;
 mod tablet;
 use tablet::VirtualTablet;
 
+mod grab;
+use grab::GrabbedDevice;
+
 fn main() {
   let mut device = Device::open("/dev/input/event5")
     .expect("Failed to open evdev device");
+  let mut device = GrabbedDevice::grab(&mut device);
 
   let mut vtablet = VirtualTablet::new();
 
@@ -28,7 +32,7 @@ fn main() {
             },
             _ => {},
           }
-          println!("{:?}", cursor_position);
+          //println!("{:?}", cursor_position);
         },
         _ => {},
       }
