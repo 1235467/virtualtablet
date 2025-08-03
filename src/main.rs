@@ -92,10 +92,28 @@ fn main() {
   
   // Threshold for position updates (reduces unnecessary updates)
   const POSITION_THRESHOLD: f64 = 1.0;
-  
+
+  // --- Smart Jump Filter for osu! ---
+  // This logic handles two conflicting problems:
+  // 1. Sweaty fingers causing single-frame coordinate spikes.
+  // 2. osu! gameplay requiring legitimate, large, high-speed jumps.
+  // The solution is to require a "confirmation" for any large jump.
+  // A jump is only accepted if the *next* input point lands near the jump's destination.
+
+  // If a move is bigger than this, it's a potential jump that needs confirmation.
+  const JUMP_DETECTION_THRESHOLD: f64 = 100.0;
+  // To confirm a jump, the next point must be this close to the candidate point.
+  const JUMP_CONFIRMATION_DISTANCE: f64 = 75.0;
+
   let mut cursor_position = DVec2::ZERO;
   let mut smoothed_position = DVec2::ZERO;
+  // The last cursor position that we're confident is correct.
+  let mut last_confirmed_position = DVec2::ZERO;
   let mut last_position = DVec2::ZERO;
+  // If a big jump happens, we store it here and wait for the next frame to confirm.
+  let mut jump_candidate: Option<DVec2> = None;
+  // Handles the very first point we receive.
+  let mut has_received_point = false;
   let mut last_update = Instant::now();
 
   let mut touch_tracker = TouchTracker::new();
@@ -123,9 +141,43 @@ fn main() {
           let normalized_y = (avg_pos.y - SECTION_MIN_Y) / SECTION_RANGE_Y;
           cursor_position.y = normalized_y.clamp(0.0, 1.0) * 1000.0;
 
+          // The smart jump filter logic starts here.
+          if !has_received_point {
+            // First point, nothing to compare to. Just accept it.
+            last_confirmed_position = cursor_position;
+            smoothed_position = cursor_position; // Also prime the smoother.
+            has_received_point = true;
+          } else {
+            if let Some(candidate) = jump_candidate {
+              // Last frame we had a potential jump. Does this new point confirm it?
+              if cursor_position.distance(candidate) < JUMP_CONFIRMATION_DISTANCE {
+                // Looks like a real jump. The cursor followed through. Accept it.
+                last_confirmed_position = candidate;
+              }
+              // If not, it was a fluke. We do nothing and the cursor stays put,
+              // effectively ignoring the bad single-frame spike.
+
+              // We've handled the candidate, so clear it for the next frame.
+              jump_candidate = None;
+
+            } else {
+              // Normal state: no jump candidate pending.
+              // Is this new move large enough to be a potential jump?
+              if cursor_position.distance(last_confirmed_position) > JUMP_DETECTION_THRESHOLD {
+                // It's a big move. Hold on, let's see what the next frame says.
+                // Store it as a candidate but don't move the cursor yet.
+                jump_candidate = Some(cursor_position);
+              } else {
+                // Just a regular, small move. Accept it.
+                last_confirmed_position = cursor_position;
+              }
+            }
+          }
+
           // Apply exponential moving average for smoothing to reduce jitter
+          // Use the *last confirmed* position as the input for smoothing.
           smoothed_position =
-            cursor_position * SMOOTHING_FACTOR + smoothed_position * (1.0 - SMOOTHING_FACTOR);
+            last_confirmed_position * SMOOTHING_FACTOR + smoothed_position * (1.0 - SMOOTHING_FACTOR);
 
           let delta = (smoothed_position - last_position).length();
           let now = Instant::now();
