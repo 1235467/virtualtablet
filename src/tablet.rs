@@ -62,11 +62,18 @@ impl VirtualTablet {
   }
 
   pub fn update(&mut self, new_position: DVec2) {
-    let mapped_position = (new_position * RESOLUTION.as_dvec2()).as_ivec2();
-    self.device.emit(&[
-      InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_X.0, mapped_position.x),
-      InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_Y.0, mapped_position.y),
+    // Fast path: direct integer conversion and emission
+    let events = [
+      InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_X.0, new_position.x as i32),
+      InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_Y.0, new_position.y as i32),
       InputEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_PRESSURE.0, 1),
-    ]).unwrap();
+    ];
+    
+    // Use expect only in debug builds
+    if cfg!(debug_assertions) {
+      self.device.emit(&events).expect("Failed to emit events");
+    } else {
+      let _ = self.device.emit(&events);
+    }
   }
 }
