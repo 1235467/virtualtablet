@@ -21,11 +21,27 @@ fn main() {
   const TRACKPAD_MIN_Y: f64 = -2478.0;
   const TRACKPAD_MAX_Y: f64 = 2587.0;
   
-  // Calculate scaling factors to map trackpad range to virtual tablet resolution
-  const TRACKPAD_RANGE_X: f64 = TRACKPAD_MAX_X - TRACKPAD_MIN_X;
-  const TRACKPAD_RANGE_Y: f64 = TRACKPAD_MAX_Y - TRACKPAD_MIN_Y;
-  const SCALE_X: f64 = 1000.0 / TRACKPAD_RANGE_X;
-  const SCALE_Y: f64 = 1000.0 / TRACKPAD_RANGE_Y;
+  // Calculate the center 1/4 section coordinates
+  // Center 1/4: centered both horizontally and vertically, 1/2 width and 1/2 height
+  const SECTION_WIDTH: f64 = (TRACKPAD_MAX_X - TRACKPAD_MIN_X) * 0.5;  // 1/2 width
+  const SECTION_HEIGHT: f64 = (TRACKPAD_MAX_Y - TRACKPAD_MIN_Y) * 0.5;  // 1/2 height
+  
+  // Center the section both horizontally and vertically
+  const SECTION_MIN_X: f64 = TRACKPAD_MIN_X + ((TRACKPAD_MAX_X - TRACKPAD_MIN_X) - SECTION_WIDTH) * 0.5;
+  const SECTION_MAX_X: f64 = SECTION_MIN_X + SECTION_WIDTH;
+  const SECTION_MIN_Y: f64 = TRACKPAD_MIN_Y + ((TRACKPAD_MAX_Y - TRACKPAD_MIN_Y) - SECTION_HEIGHT) * 0.5;
+  const SECTION_MAX_Y: f64 = SECTION_MIN_Y + SECTION_HEIGHT;
+  
+  // Calculate scaling factors to map section range to virtual tablet resolution
+  const SECTION_RANGE_X: f64 = SECTION_MAX_X - SECTION_MIN_X;
+  const SECTION_RANGE_Y: f64 = SECTION_MAX_Y - SECTION_MIN_Y;
+  
+  // Debug: Print calculated section boundaries
+  println!("Trackpad range: X={:.0} to {:.0}, Y={:.0} to {:.0}",
+           TRACKPAD_MIN_X, TRACKPAD_MAX_X, TRACKPAD_MIN_Y, TRACKPAD_MAX_Y);
+  println!("Center 1/4 section: X={:.0} to {:.0}, Y={:.0} to {:.0}",
+           SECTION_MIN_X, SECTION_MAX_X, SECTION_MIN_Y, SECTION_MAX_Y);
+  println!("Section dimensions: {:.0} x {:.0}", SECTION_WIDTH, SECTION_HEIGHT);
   
   // Threshold for position updates (reduces unnecessary updates)
   const POSITION_THRESHOLD: f64 = 1.0;
@@ -58,14 +74,14 @@ fn main() {
         // Apply updates only if we have new data
         let mut updated = false;
         if let Some(x) = pending_x {
-          // Normalize trackpad coordinate to 0-1 range, then scale to tablet resolution
-          let normalized_x = (x as f64 - TRACKPAD_MIN_X) / TRACKPAD_RANGE_X;
+          // Map trackpad coordinate to the center 1/4 section
+          let normalized_x = (x as f64 - SECTION_MIN_X) / SECTION_RANGE_X;
           cursor_position.x = normalized_x.clamp(0.0, 1.0) * 1000.0;
           updated = true;
         }
         if let Some(y) = pending_y {
-          // Normalize trackpad coordinate to 0-1 range, then scale to tablet resolution
-          let normalized_y = (y as f64 - TRACKPAD_MIN_Y) / TRACKPAD_RANGE_Y;
+          // Map trackpad coordinate to the center 1/4 section
+          let normalized_y = (y as f64 - SECTION_MIN_Y) / SECTION_RANGE_Y;
           cursor_position.y = normalized_y.clamp(0.0, 1.0) * 1000.0;
           updated = true;
         }
