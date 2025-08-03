@@ -1,5 +1,6 @@
-use evdev::{Device, InputEventKind, AbsoluteAxisType};
+use evdev::{Device, InputEventKind, AbsoluteAxisType, Key};
 use glam::DVec2;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 mod tablet;
@@ -7,6 +8,52 @@ use tablet::VirtualTablet;
 
 mod grab;
 use grab::GrabbedDevice;
+
+struct TouchTracker {
+  touches: HashMap<i32, DVec2>,
+  current_slot: i32,
+}
+
+impl TouchTracker {
+  fn new() -> Self {
+    Self {
+      touches: HashMap::new(),
+      current_slot: 0,
+    }
+  }
+
+  fn handle_event(&mut self, event: &evdev::InputEvent) {
+    match event.kind() {
+      InputEventKind::AbsAxis(axis) => match axis {
+        AbsoluteAxisType::ABS_MT_SLOT => self.current_slot = event.value(),
+        AbsoluteAxisType::ABS_MT_TRACKING_ID => {
+          if event.value() == -1 {
+            self.touches.remove(&self.current_slot);
+          }
+        }
+        AbsoluteAxisType::ABS_MT_POSITION_X => {
+          self.touches.entry(self.current_slot).or_default().x = event.value() as f64;
+        }
+        AbsoluteAxisType::ABS_MT_POSITION_Y => {
+          self.touches.entry(self.current_slot).or_default().y = event.value() as f64;
+        }
+        _ => (),
+      },
+      InputEventKind::Key(key) if key == Key::BTN_TOUCH && event.value() == 0 => {
+        self.touches.clear();
+      }
+      _ => (),
+    }
+  }
+
+  fn average_position(&self) -> Option<DVec2> {
+    if self.touches.is_empty() {
+      return None;
+    }
+    let sum: DVec2 = self.touches.values().copied().sum();
+    Some(sum / self.touches.len() as f64)
+  }
+}
 
 fn main() {
   let mut device = Device::open("/dev/input/event18")
@@ -51,54 +98,38 @@ fn main() {
   let mut last_position = DVec2::ZERO;
   let mut last_update = Instant::now();
 
+  let mut touch_tracker = TouchTracker::new();
+
   // Smoothing factor for cursor movement to reduce jitter (debounce)
   // Adjust between 0.0 (heavy smoothing) and 1.0 (no smoothing)
   const SMOOTHING_FACTOR: f64 = 0.5;
-  
+
   // Rate limiting - max 1000 updates per second
   const MIN_UPDATE_INTERVAL: Duration = Duration::from_micros(1000);
-  
+
   loop {
     // Use a more efficient polling approach
     match device.fetch_events() {
       Ok(events) => {
-        let mut pending_x = None;
-        let mut pending_y = None;
-        
-        // Process all events in batch, only keeping the latest values
         for event in events {
-          if let InputEventKind::AbsAxis(axis) = event.kind() {
-            match axis {
-              AbsoluteAxisType::ABS_X => pending_x = Some(event.value()),
-              AbsoluteAxisType::ABS_Y => pending_y = Some(event.value()),
-              _ => {},
-            }
-          }
+          touch_tracker.handle_event(&event);
         }
-        
-        // Apply updates only if we have new data
-        let mut updated = false;
-        if let Some(x) = pending_x {
+
+        if let Some(avg_pos) = touch_tracker.average_position() {
           // Map trackpad coordinate to the center 1/4 section
-          let normalized_x = (x as f64 - SECTION_MIN_X) / SECTION_RANGE_X;
+          let normalized_x = (avg_pos.x - SECTION_MIN_X) / SECTION_RANGE_X;
           cursor_position.x = normalized_x.clamp(0.0, 1.0) * 1000.0;
-          updated = true;
-        }
-        if let Some(y) = pending_y {
-          // Map trackpad coordinate to the center 1/4 section
-          let normalized_y = (y as f64 - SECTION_MIN_Y) / SECTION_RANGE_Y;
+
+          let normalized_y = (avg_pos.y - SECTION_MIN_Y) / SECTION_RANGE_Y;
           cursor_position.y = normalized_y.clamp(0.0, 1.0) * 1000.0;
-          updated = true;
-        }
-        
-        // Batch update with rate limiting
-        if updated {
+
           // Apply exponential moving average for smoothing to reduce jitter
-          smoothed_position = cursor_position * SMOOTHING_FACTOR + smoothed_position * (1.0 - SMOOTHING_FACTOR);
+          smoothed_position =
+            cursor_position * SMOOTHING_FACTOR + smoothed_position * (1.0 - SMOOTHING_FACTOR);
 
           let delta = (smoothed_position - last_position).length();
           let now = Instant::now();
-          
+
           if delta > POSITION_THRESHOLD && now - last_update >= MIN_UPDATE_INTERVAL {
             vtablet.update(smoothed_position);
             last_position = smoothed_position;
