@@ -47,8 +47,13 @@ fn main() {
   const POSITION_THRESHOLD: f64 = 1.0;
   
   let mut cursor_position = DVec2::ZERO;
+  let mut smoothed_position = DVec2::ZERO;
   let mut last_position = DVec2::ZERO;
   let mut last_update = Instant::now();
+
+  // Smoothing factor for cursor movement to reduce jitter (debounce)
+  // Adjust between 0.0 (heavy smoothing) and 1.0 (no smoothing)
+  const SMOOTHING_FACTOR: f64 = 0.5;
   
   // Rate limiting - max 1000 updates per second
   const MIN_UPDATE_INTERVAL: Duration = Duration::from_micros(1000);
@@ -88,12 +93,15 @@ fn main() {
         
         // Batch update with rate limiting
         if updated {
-          let delta = (cursor_position - last_position).length();
+          // Apply exponential moving average for smoothing to reduce jitter
+          smoothed_position = cursor_position * SMOOTHING_FACTOR + smoothed_position * (1.0 - SMOOTHING_FACTOR);
+
+          let delta = (smoothed_position - last_position).length();
           let now = Instant::now();
           
           if delta > POSITION_THRESHOLD && now - last_update >= MIN_UPDATE_INTERVAL {
-            vtablet.update(cursor_position);
-            last_position = cursor_position;
+            vtablet.update(smoothed_position);
+            last_position = smoothed_position;
             last_update = now;
           }
         }
